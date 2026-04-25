@@ -1,0 +1,10 @@
+{
+  "name": "chess-review",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "bash scripts/start-dev.sh",
+    "start": "bash scripts/start-dev.sh"
+  }
+}
+

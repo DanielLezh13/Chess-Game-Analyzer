@@ -1,0 +1,155 @@
+@import "tailwindcss";
+
+:root {
+  color-scheme: dark;
+  background: #101114;
+  color: #f4f1ea;
+  --move-brilliant: #4fa1c7;
+  --move-great: #7a7a97;
+  --move-best: #69923e;
+  --move-good: #8aa36f;
+  --move-book: #b5a486;
+  --move-inaccuracy: #e5b244;
+  --move-mistake: #d17838;
+  --move-blunder: #b04938;
+  --move-missed: #e0d0da;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    linear-gradient(135deg, rgba(44, 87, 111, 0.42), transparent 42%),
+    linear-gradient(315deg, rgba(31, 72, 88, 0.36), transparent 34%),
+    #0f1d27;
+  color: #f4f1ea;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+button,
+textarea {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+.move-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: #6f7f77 #181b1d;
+}
+
+.move-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.move-scroll::-webkit-scrollbar-track {
+  background: #181b1d;
+}
+
+.move-scroll::-webkit-scrollbar-thumb {
+  background: #6f7f77;
+  border-radius: 999px;
+}
+
+.sidebar-rail {
+  position: sticky;
+  top: 0.75rem;
+  align-self: start;
+  width: 100%;
+  max-height: calc(100vh - 1.5rem);
+  overflow: hidden;
+  padding: 0.75rem 0.55rem;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 0.875rem;
+  background: rgba(28, 48, 61, 0.9);
+  box-shadow:
+    0 24px 40px rgba(0, 0, 0, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(16px);
+}
+
+.sidebar-rail-button {
+  position: relative;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 0.35rem;
+  width: 100%;
+  min-height: 2.8rem;
+  padding: 0.1rem 0.72rem 0.1rem 0.8rem;
+  border: 1px solid transparent;
+  border-radius: 0.7rem;
+  background: transparent;
+  color: rgba(244, 241, 234, 0.8);
+  text-align: left;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.sidebar-rail-button:hover {
+  background: rgba(255, 255, 255, 0.08);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.13);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.08),
+    0 0 18px rgba(255, 255, 255, 0.08);
+}
+
+.sidebar-rail-button[data-active="true"] {
+  background: rgba(255, 255, 255, 0.11);
+  color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.16);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.1),
+    0 0 18px rgba(255, 255, 255, 0.06);
+}
+
+.sidebar-rail-button[data-active="true"]::before {
+  content: "";
+  position: absolute;
+  inset: 0.35rem auto 0.35rem 0.2rem;
+  width: 0.18rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 0 10px rgba(255, 255, 255, 0.28);
+}
+
+.sidebar-rail-button[data-disabled="true"] {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.sidebar-rail-button__icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  justify-content: center;
+  align-items: center;
+  width: 18px;
+  height: 18px;
+}
+
+.sidebar-rail-button__label {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1.1;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
