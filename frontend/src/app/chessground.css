@@ -1,0 +1,77 @@
+@import "@lichess-org/chessground/assets/chessground.base.css";
+@import "@lichess-org/chessground/assets/chessground.cburnett.css";
+
+/* Board colors matching our theme */
+.cg-wrap cg-board {
+  background-color: #d7e5e8; /* light square base */
+  background-image: none;
+}
+
+/* Custom square colors via coordinate-based approach */
+.cg-wrap square {
+  background-color: transparent;
+}
+
+/* Override last-move highlight */
+.cg-wrap square.last-move {
+  background-color: transparent !important;
+}
+
+/* Override check highlight */
+.cg-wrap square.check {
+  background: none !important;
+}
+
+/* Override selected square */
+.cg-wrap square.selected {
+  background-color: transparent !important;
+}
+
+/* Override move-dest indicators - we handle these ourselves */
+.cg-wrap square.move-dest {
+  background: none !important;
+}
+
+.cg-wrap square.oc.move-dest {
+  background: none !important;
+}
+
+/* Override premove dest */
+.cg-wrap square.premove-dest {
+  background: none !important;
+}
+
+/* Ghost piece while dragging */
+.cg-wrap piece.ghost {
+  opacity: 0 !important;
+}
+
+/* Dragging piece style */
+.cg-wrap piece.dragging {
+  filter: drop-shadow(0 12px 20px rgba(0, 0, 0, 0.35));
+  transform: scale(1.04);
+}
+
+/* Custom black king override */
+.cg-wrap piece.king.black {
+  background-image: url("/Chess_kdt45.svg") !important;
+}
+
+/* Remove default focus outlines */
+.cg-wrap,
+.cg-wrap * {
+  outline: none !important;
+}
+
+/* Ensure the board fills its container */
+.cg-wrap {
+  width: 100%;
+  height: 100%;
+  box-sizing: content-box;
+}
+
+/* Overlay container must match chessground's box-sizing */
+.cg-wrap + div,
+.cg-wrap ~ div {
+  box-sizing: content-box;
+}

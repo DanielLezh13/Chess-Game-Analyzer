@@ -9,11 +9,11 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@lichess-org/chessground": "^10.1.1",
     "chess.js": "latest",
     "lucide-react": "latest",
     "next": "latest",
     "react": "latest",
-    "react-chessboard": "latest",
     "react-dom": "latest"
   },
   "devDependencies": {
