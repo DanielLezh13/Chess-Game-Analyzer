@@ -6,6 +6,12 @@ Chess Review is a full-stack chess analysis app for reviewing PGN games move by 
 
 ![Chess Review game analysis interface](frontend/public/home-review-board.png)
 
+### Full Game Review
+
+The analysis workspace keeps the board, evaluation graph, player accuracy, and move-classification summary visible together.
+
+![Chess Review full analysis with the Game Review panel](frontend/public/how-it-works-play-position.png)
+
 ## Features
 
 - Paste or upload PGN files and reject malformed game data with clear errors
