@@ -1,43 +1,63 @@
 # Chess Review
 
-A local-first chess game review MVP. Paste a PGN, run engine analysis, and step through the game with an eval bar, best-move suggestion, move labels, and summary stats.
+[Live demo](https://chessreview-app.vercel.app) | [API health](https://backend-eight-indol-21.vercel.app/api/health)
 
-The app is intentionally PGN-first. Account sync and Chess.com import can be added later after the review loop is solid.
+Chess Review is a full-stack chess analysis app for reviewing PGN games move by move. It combines engine evaluation, practical move classifications, opening detection, account-backed game history, and a responsive review board in one workflow.
 
-It also has a live board mode for quick testing: start from the normal initial position, drag legal moves, see the detected opening, current eval, best move, and then send the moves into the full review flow.
+![Chess Review game analysis interface](frontend/public/home-review-board.png)
 
-## Stack
+## Features
 
-- `frontend/`: Next.js App Router, TypeScript, Tailwind CSS, React, `react-chessboard`, `chess.js`
-- `backend/`: FastAPI, `python-chess`, Stockfish through the UCI protocol
+- Paste or upload PGN files and reject malformed game data with clear errors
+- Review every move with evaluations, best lines, classifications, and explanations
+- Explore positions on an interactive board with captured pieces and an evaluation bar
+- Search and sort saved games by player, opening, result, and date
+- Sign in with Google through Supabase Auth
+- Keep guest data separate from each signed-in account
+- Sync saved games and profile data across sign-out, refresh, and sign-in
+- Browse a curated collection of public games
+- Use Stockfish when available, with a deterministic fallback for serverless environments
+- Run on desktop and mobile layouts
 
-## Requirements
+## Architecture
 
-- Node.js 20+
-- Python 3.9+
-- Stockfish binary recommended
-
-On macOS, Stockfish can usually be installed with:
-
-```bash
-brew install stockfish
+```text
+Next.js frontend
+  |-- Supabase Auth + Postgres (profiles and saved games)
+  |-- FastAPI analysis API
+        |-- python-chess
+        |-- Stockfish when installed
+        `-- heuristic fallback otherwise
 ```
 
-If Stockfish is not installed, the backend still returns a heuristic fallback analysis so the UI can be tested. Real move quality requires Stockfish.
+The frontend is deployed on Vercel. The FastAPI backend is deployed as a separate Vercel project. Supabase Row Level Security restricts profiles and saved games to their owning user.
+
+## Tech Stack
+
+- Next.js 16, React, TypeScript, Tailwind CSS
+- Chessground and chess.js
+- FastAPI, Pydantic, python-chess
+- Stockfish via UCI
+- Supabase Auth and Postgres
+- Vercel
 
 ## Run Locally
 
-Fast path from the project root:
+Requirements:
+
+- Node.js 20+
+- Python 3.12
+- Stockfish recommended for full engine analysis
+
+From the repository root:
 
 ```bash
 npm run dev
 ```
 
-Or double-click `Start Chess Review.command` on macOS. The launcher installs missing dependencies, starts the backend and frontend, and opens [http://localhost:3000](http://localhost:3000).
+The launcher installs missing dependencies, starts the API on port `8000`, and starts the frontend on port `3000` or the next available local port.
 
-In Codex Desktop, use the top-right Run/play action. It is configured by `.codex/environments/environment.toml` and runs the same `npm run dev` launcher.
-
-Install frontend dependencies:
+For manual setup:
 
 ```bash
 cd frontend
@@ -45,8 +65,6 @@ npm install
 cp .env.example .env.local
 npm run dev
 ```
-
-Install backend dependencies and start the API:
 
 ```bash
 cd backend
@@ -57,54 +75,61 @@ cp .env.example .env
 uvicorn app.main:app --reload --port 8000
 ```
 
-Open the frontend at [http://localhost:3000](http://localhost:3000).
-
-## Environment
-
-Backend:
-
-- `STOCKFISH_PATH`: optional absolute path to a Stockfish binary
-- `ENGINE_DEPTH`: optional search depth, default `8`
+## Environment Variables
 
 Frontend:
 
-- `NEXT_PUBLIC_API_URL`: backend URL, default `http://localhost:8000`
-
-## API
-
-### `GET /api/health`
-
-Returns backend health and whether Stockfish was found.
-
-### `POST /api/analyze`
-
-Input:
-
-```json
-{
-  "pgn": "..."
-}
+```dotenv
+NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
 ```
 
-Output includes:
+Backend:
 
-- `metadata`
-- `moves`
-- `summary`
-- per-move FEN, SAN, played move, best move, evals, centipawn loss, classification, and explanation
-
-### `POST /api/evaluate`
-
-Input:
-
-```json
-{
-  "fen": "..."
-}
+```dotenv
+STOCKFISH_PATH=
+ENGINE_DEPTH=12
+ALLOWED_ORIGINS=http://localhost:3000
+ALLOWED_ORIGIN_REGEX=
 ```
 
-Output includes the current eval, best move, best line, side to move, and analysis source.
+Only public Supabase client values belong in the frontend. Do not commit service-role keys, OAuth client secrets, or local `.env` files.
 
-## Sample PGN
+## Supabase Setup
 
-Use `samples/sample.pgn` or the sample button in the app.
+1. Create a Supabase project and run [`supabase/schema.sql`](supabase/schema.sql).
+2. Enable Google under Authentication providers.
+3. Add the Supabase callback URL to the Google OAuth client.
+4. Add local and production app URLs to Supabase redirect URLs.
+5. Set the frontend environment variables locally and in Vercel.
+
+The schema enables Row Level Security and owner-only policies for `profiles` and `user_games`.
+
+## Validation
+
+```bash
+npm run build
+npm run lint
+npm test
+```
+
+Backend tests cover invalid PGN handling and core move-classification behavior. GitHub Actions runs the production frontend build and backend test suite on pushes and pull requests.
+
+## Project Structure
+
+```text
+backend/             FastAPI analysis service and tests
+frontend/            Next.js application and static assets
+scripts/             Local launcher and public-game importer
+supabase/schema.sql  Database schema, trigger, grants, and RLS policies
+samples/             Sample PGN
+```
+
+## Analysis Notes
+
+Stockfish produces the strongest and most accurate review. When a Stockfish binary is unavailable, the API returns a heuristic analysis so the app remains usable in constrained serverless environments. The response identifies which analysis source was used.
+
+## License
+
+MIT. See [`LICENSE`](LICENSE).

@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "bash scripts/start-dev.sh",
-    "start": "bash scripts/start-dev.sh"
+    "start": "bash scripts/start-dev.sh",
+    "build": "npm --prefix frontend run build",
+    "lint": "npm --prefix frontend run lint",
+    "test": "bash -c 'PYTHON=python3; [ ! -x backend/.venv/bin/python ] || PYTHON=backend/.venv/bin/python; \"$PYTHON\" -m unittest discover -s backend/tests -v'"
   }
 }
-

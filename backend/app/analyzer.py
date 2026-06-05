@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import io
+import json
 import math
 import os
+from pathlib import Path
 from typing import Any, Optional
 
 import chess
@@ -30,12 +32,132 @@ PIECE_NAMES = {
 }
 
 
+def load_openings() -> list[dict[str, Any]]:
+    openings_path = Path(__file__).resolve().parents[2] / "frontend" / "public" / "openings.json"
+    fallback_openings = [
+        {"name": "King's Pawn Game", "eco": "C20", "moves": ["e4", "e5"]},
+        {"name": "French Defense", "eco": "C00", "moves": ["e4", "e6"]},
+        {"name": "Sicilian Defense", "eco": "B20", "moves": ["e4", "c5"]},
+        {"name": "Queen's Pawn Game", "eco": "D00", "moves": ["d4", "d5"]},
+        {"name": "London System", "eco": "D02", "moves": ["d4", "d5", "Bf4"]},
+        {"name": "Queen's Gambit", "eco": "D06", "moves": ["d4", "d5", "c4"]},
+        {"name": "Réti Opening", "eco": "A04", "moves": ["Nf3"]},
+        {"name": "English Opening", "eco": "A10", "moves": ["c4"]},
+    ]
+
+    try:
+        with openings_path.open() as file:
+            data = json.load(file)
+        openings: list[dict[str, Any]] = []
+        for entry in data:
+            moves = entry.get("moves")
+            name = entry.get("name")
+            if not isinstance(moves, str) or not isinstance(name, str):
+                continue
+            openings.append(
+                {
+                    "name": name,
+                    "eco": entry.get("eco", ""),
+                    "moves": moves.split(),
+                }
+            )
+        return openings or fallback_openings
+    except Exception:
+        return fallback_openings
+
+
+OPENINGS = load_openings()
+
+
+def opening_position_key(board: chess.Board) -> str:
+    return " ".join(board.fen().split()[:4])
+
+
+def build_opening_book() -> dict[tuple[str, str], dict[str, str]]:
+    book: dict[tuple[str, str], dict[str, str]] = {}
+
+    for opening in OPENINGS:
+        board = chess.Board()
+        for san in opening["moves"]:
+            try:
+                move = board.parse_san(san)
+            except ValueError:
+                break
+
+            key = (opening_position_key(board), move.uci())
+            book.setdefault(
+                key,
+                {
+                    "name": str(opening["name"]),
+                    "eco": str(opening.get("eco") or ""),
+                },
+            )
+            board.push(move)
+
+    return book
+
+
+OPENING_BOOK = build_opening_book()
+
+
+def book_opening_for_move(board: chess.Board, move: chess.Move) -> Optional[dict[str, str]]:
+    return OPENING_BOOK.get((opening_position_key(board), move.uci()))
+
+
+def opening_for_sequence(sans: list[str]) -> dict[str, str]:
+    if not sans:
+        return {"name": "Starting position", "eco": ""}
+
+    best: Optional[dict[str, Any]] = None
+    best_len = 0
+    prefix_match: Optional[dict[str, Any]] = None
+    prefix_len = 10**9
+
+    for opening in OPENINGS:
+        moves = opening["moves"]
+        if len(moves) <= len(sans) and sans[: len(moves)] == moves and len(moves) > best_len:
+            best = opening
+            best_len = len(moves)
+        if len(sans) < len(moves) and moves[: len(sans)] == sans and len(moves) < prefix_len:
+            prefix_match = opening
+            prefix_len = len(moves)
+
+    if best is None and prefix_match is None:
+        return {"name": "Unknown", "eco": ""}
+
+    opening = best or prefix_match
+    return {
+        "name": str(opening["name"]),
+        "eco": str(opening.get("eco") or ""),
+    }
+
+
 def material_balance(board: chess.Board) -> int:
     score = 0
     for piece_type, value in MATERIAL_VALUES.items():
         score += len(board.pieces(piece_type, chess.WHITE)) * value
         score -= len(board.pieces(piece_type, chess.BLACK)) * value
     return score
+
+
+def projected_material_gain(
+    board: chess.Board,
+    line: list[str],
+    color: str,
+    baseline_balance: int,
+) -> int:
+    preview = board.copy(stack=False)
+
+    for uci in line:
+        try:
+            move = chess.Move.from_uci(uci)
+        except ValueError:
+            break
+        if move not in preview.legal_moves:
+            break
+        preview.push(move)
+
+    return mover_pov(material_balance(preview) - baseline_balance, color)
 
 
 def format_material_balance(balance: int) -> str:
@@ -62,48 +184,155 @@ def captured_piece_info(board: chess.Board, move: chess.Move) -> Optional[dict[s
     }
 
 
-def expected_points_from_cp(cp: int) -> float:
+def player_rating_from_headers(headers: chess.pgn.Headers, color: str) -> Optional[int]:
+    value = headers.get("WhiteElo" if color == "white" else "BlackElo", "")
+    try:
+        rating = int(str(value).strip())
+    except ValueError:
+        return None
+    return rating if rating > 0 else None
+
+
+def expected_points_from_cp(cp: int, rating: Optional[int] = None) -> float:
     clamped = max(-1200, min(1200, cp))
-    return 1.0 / (1.0 + math.exp(-clamped / 300.0))
+    # Chess.com's public model is rating-aware, but the exact curve is private.
+    # Lower-rated players need a larger eval edge before a position is practically winning.
+    rating_value = rating if rating is not None else 1200
+    scale = max(260.0, min(430.0, 460.0 - rating_value * 0.07))
+    return 1.0 / (1.0 + math.exp(-clamped / scale))
 
 
-def mover_expected_points(eval_score: EvalScore, color: str) -> float:
-    white_expected = expected_points_from_cp(eval_score.cp)
+def mover_expected_points(eval_score: EvalScore, color: str, rating: Optional[int] = None) -> float:
+    if eval_score.mate is not None:
+        white_expected = 1.0 if eval_score.cp > 0 else 0.0
+    else:
+        white_expected = expected_points_from_cp(eval_score.cp, rating)
     return white_expected if color == "white" else 1.0 - white_expected
+
+
+def is_outcome_changing_move(after_expected: float, next_best_expected: Optional[float]) -> bool:
+    if next_best_expected is None:
+        return False
+
+    # Chess.com describes Great moves as critical: the only good move, or a
+    # move that changes the practical outcome from losing/equal into equal/win.
+    expected_gap = after_expected - next_best_expected
+    only_move_avoiding_a_real_drop = expected_gap >= 0.10
+    losing_to_equal = next_best_expected <= 0.35 and after_expected >= 0.45
+    equal_to_winning = next_best_expected <= 0.58 and after_expected >= 0.70
+    return only_move_avoiding_a_real_drop or losing_to_equal or equal_to_winning
+
+
+def is_routine_best_capture(
+    *,
+    captured_piece_value: int,
+    expected_loss: float,
+    played_engine_top: bool,
+    is_sacrifice: bool,
+    gives_check: bool,
+    before_expected: float,
+    after_expected: float,
+) -> bool:
+    if captured_piece_value < MATERIAL_VALUES[chess.BISHOP]:
+        return False
+    if not played_engine_top or expected_loss > 0.02 or is_sacrifice or gives_check:
+        return False
+
+    # Cleanly taking a hanging or forced minor/major piece is usually just the
+    # best move. Keep Great for captures that truly rescue or flip the position.
+    rescued_position = before_expected <= 0.35 and after_expected >= 0.45
+    flipped_position = before_expected <= 0.58 and after_expected >= 0.70
+    return not rescued_position and not flipped_position
 
 
 def classification_for_move(
     *,
     expected_loss: float,
     cp_loss: int,
+    move_number: int,
     played_uci: str,
     best_uci: Optional[str],
-    ply: int,
+    is_book: bool,
     is_sacrifice: bool,
+    captured_piece_value: int,
+    gives_check: bool,
     before_expected: float,
+    after_expected: float,
+    next_best_expected: Optional[float],
+    missed_tactical_gain: int,
 ) -> str:
-    if ply <= 10 and expected_loss <= 0.02:
+    # Opening databases can contain dubious sidelines and traps. A known move
+    # should not hide a real tactical error or a large loss in expected score.
+    if is_book and expected_loss <= 0.05:
         return "book"
-    if is_sacrifice and expected_loss <= 0.02:
+
+    best_or_nearly_best = expected_loss <= 0.02
+    played_engine_top = bool(best_uci and played_uci == best_uci)
+
+    if (
+        is_sacrifice
+        and best_or_nearly_best
+        and after_expected >= 0.45
+        and (next_best_expected is None or next_best_expected <= 0.90)
+    ):
         return "brilliant"
-    if best_uci and played_uci == best_uci:
-        return "best"
-    if before_expected >= 0.80 and expected_loss >= 0.10 and cp_loss >= 100:
+    missed_existing_advantage = (
+        0.35 <= after_expected <= 0.58
+        and before_expected >= 0.70
+        and expected_loss >= 0.10
+        and cp_loss >= 100
+    )
+    missed_material_tactic = (
+        missed_tactical_gain >= MATERIAL_VALUES[chess.KNIGHT]
+        and 0.04 <= expected_loss <= 0.10
+        and cp_loss >= 75
+    )
+    if missed_existing_advantage or missed_material_tactic:
         return "miss"
-    if expected_loss <= 0.02 and cp_loss >= 60:
+    if is_routine_best_capture(
+        captured_piece_value=captured_piece_value,
+        expected_loss=expected_loss,
+        played_engine_top=played_engine_top,
+        is_sacrifice=is_sacrifice,
+        gives_check=gives_check,
+        before_expected=before_expected,
+        after_expected=after_expected,
+    ):
+        return "best"
+    if best_or_nearly_best and is_outcome_changing_move(after_expected, next_best_expected):
         return "great"
+    if played_engine_top:
+        return "best"
     if expected_loss <= 0.02:
         return "excellent"
+    if cp_loss >= MATE_SCORE // 2 and after_expected <= 0.01:
+        return "blunder" if before_expected >= 0.45 else "mistake"
+    if before_expected <= 0.45 and cp_loss >= 150 and expected_loss >= 0.075:
+        return "mistake"
+    if move_number <= 3 and expected_loss <= 0.06 and cp_loss <= 100:
+        return "good"
+    if after_expected >= 0.60 and expected_loss <= 0.08 and cp_loss <= 150:
+        return "good"
+    if before_expected <= 0.45 and 0.04 <= expected_loss <= 0.10 and cp_loss >= 70:
+        return "inaccuracy"
     if expected_loss <= 0.05:
         return "good"
-    if expected_loss <= 0.10:
+    if before_expected <= 0.45 and expected_loss <= 0.12:
+        return "inaccuracy"
+    if expected_loss <= 0.095:
         return "inaccuracy"
     if expected_loss <= 0.20:
         return "mistake"
     return "blunder"
 
 
-def explanation_for(classification: str, loss: int, expected_loss: float, best_san: Optional[str]) -> str:
+def explanation_for(
+    classification: str,
+    loss: int,
+    expected_loss: float,
+    best_san: Optional[str],
+    missed_tactical_gain: int,
+) -> str:
     point_loss = f"{expected_loss * 100:.0f}%"
     if classification == "book":
         return "A standard opening move that keeps the game in known territory."
@@ -112,14 +341,16 @@ def explanation_for(classification: str, loss: int, expected_loss: float, best_s
     if classification == "best":
         return "Matches the engine's top choice."
     if classification == "great":
-        return f"A critical move that keeps the position healthy. {best_san or 'The engine move'} was the main comparison."
+        return f"A critical move, often the only move that keeps or changes the practical result. {best_san or 'The engine move'} was the main comparison."
     if classification == "excellent":
-        return f"Keeps the position very close to the best line, changing expected points by about {point_loss}."
+        return f"A solid move very close to the best line, changing expected points by about {point_loss}."
     if classification == "good":
-        return f"A playable move, though {best_san or 'the engine move'} was a little more precise."
+        return f"A sensible move, though {best_san or 'the engine move'} was a little more precise."
     if classification == "inaccuracy":
         return f"Loses some control of the position. The engine preferred {best_san or 'another move'}."
     if classification == "miss":
+        if missed_tactical_gain >= MATERIAL_VALUES[chess.KNIGHT]:
+            return f"Missed a tactical chance to win material. {best_san or 'Another move'} was the key move."
         return f"Missed a chance to keep a strong advantage. {best_san or 'Another move'} was the key try."
     if classification == "mistake":
         return f"A significant swing. {best_san or 'The engine move'} would have preserved more of the position."
@@ -138,6 +369,15 @@ def opening_from_headers(headers: chess.pgn.Headers) -> str:
     if eco:
         return eco
     return "Unknown"
+
+
+def opening_from_moves(moves: list[dict[str, Any]], headers: chess.pgn.Headers) -> str:
+    for move in reversed(moves):
+        opening = str(move.get("opening") or "").strip()
+        if opening and opening not in {"Unknown", "Starting position"}:
+            return opening
+
+    return opening_from_headers(headers)
 
 
 def mover_pov(cp: int, color: str) -> int:
@@ -193,11 +433,29 @@ def engine_lines_payload(board: chess.Board, analysis: Any) -> list[dict[str, An
     return payload
 
 
-def accuracy_for(losses: list[int]) -> float:
-    if not losses:
+def accuracy_from_expected_loss(expected_loss: float) -> float:
+    bounded_loss = max(0.0, min(expected_loss, 1.0))
+    return 103.1668 * math.exp(-10.0 * bounded_loss) - 3.1669
+
+
+def accuracy_for(expected_losses: list[float]) -> float:
+    if not expected_losses:
         return 0.0
-    capped_average_loss = sum(min(loss, 1000) for loss in losses) / len(losses)
-    return round(max(0.0, min(100.0, 100.0 - capped_average_loss / 10.0)), 1)
+
+    bounded_losses = [max(0.0, min(loss, 1.0)) for loss in expected_losses]
+    average_loss = sum(bounded_losses) / len(bounded_losses)
+    whole_game_score = accuracy_from_expected_loss(average_loss)
+    per_move_score = sum(accuracy_from_expected_loss(loss) for loss in bounded_losses) / len(bounded_losses)
+
+    # Blending the whole-game curve with per-move scores keeps a single tactical
+    # collapse from depressing the entire review more than comparable services do.
+    score = whole_game_score * 0.75 + per_move_score * 0.25
+    return round(max(0.0, min(100.0, score)), 1)
+
+
+def engine_depth() -> int:
+    configured_depth = int(os.getenv("ENGINE_DEPTH", "12") or "12")
+    return max(12, configured_depth)
 
 
 def parse_game(pgn: str) -> chess.pgn.Game:
@@ -217,20 +475,26 @@ def analyze_pgn(pgn: str) -> dict[str, Any]:
 
     positions = [board.copy(stack=False)]
     raw_moves: list[dict[str, Any]] = []
+    sans_played: list[str] = []
     captured_by_white: list[dict[str, Any]] = []
     captured_by_black: list[dict[str, Any]] = []
 
     for ply, move in enumerate(game.mainline_moves(), start=1):
         fen_before = board.fen()
         san = board.san(move)
+        sans_played.append(san)
         color = "white" if board.turn == chess.WHITE else "black"
         move_number = board.fullmove_number
         uci = move.uci()
         capture = captured_piece_info(board, move)
+        book_opening = book_opening_for_move(board, move)
 
         board.push(move)
         fen_after = board.fen()
         material_after = material_balance(board)
+        opening = opening_for_sequence(sans_played)
+        if opening["name"] == "Unknown" and book_opening is not None:
+            opening = book_opening
         if capture is not None:
             if color == "white":
                 captured_by_white.append(capture)
@@ -248,22 +512,31 @@ def analyze_pgn(pgn: str) -> dict[str, Any]:
                 "captured_piece": capture,
                 "material_balance_cp": material_after,
                 "material_balance_display": format_material_balance(material_after),
+                "is_book": book_opening is not None,
+                "opening": opening["name"],
+                "eco": opening["eco"],
             }
         )
         positions.append(board.copy(stack=False))
 
-    depth = int(os.getenv("ENGINE_DEPTH", "8") or "8")
+    if not raw_moves:
+        raise ValueError("The PGN does not contain any moves.")
+
+    depth = engine_depth()
     analyses = analyze_positions(positions, depth=depth)
     analysis_source = analyses[0].source if analyses else "unknown"
 
     moves: list[dict[str, Any]] = []
-    losses_by_side = {"white": [], "black": []}
+    expected_losses_by_side = {"white": [], "black": []}
+    player_ratings = {
+        "white": player_rating_from_headers(headers, "white"),
+        "black": player_rating_from_headers(headers, "black"),
+    }
     counts = {
         "white": {"inaccuracy": 0, "mistake": 0, "blunder": 0},
         "black": {"inaccuracy": 0, "mistake": 0, "blunder": 0},
     }
     biggest_turning_point: Optional[dict[str, Any]] = None
-
     for idx, raw in enumerate(raw_moves):
         before = analyses[idx]
         after = analyses[idx + 1]
@@ -275,33 +548,69 @@ def analyze_pgn(pgn: str) -> dict[str, Any]:
         before_cp = before.eval.cp
         after_cp = after.eval.cp
         loss = max(0, mover_pov(before_cp, color) - mover_pov(after_cp, color))
-        before_expected = mover_expected_points(before.eval, color)
-        after_expected = mover_expected_points(after.eval, color)
+        before_expected = mover_expected_points(before.eval, color, player_ratings[color])
+        after_expected = mover_expected_points(after.eval, color, player_ratings[color])
+        next_best_expected = (
+            mover_expected_points(before.top_lines[1].eval, color, player_ratings[color])
+            if len(before.top_lines) > 1
+            else None
+        )
         expected_loss = max(0.0, before_expected - after_expected)
         material_before = material_balance(positions[idx])
         material_after = material_balance(positions[idx + 1])
         material_delta_for_mover = mover_pov(material_after - material_before, color)
+        best_line_material_gain = projected_material_gain(
+            positions[idx],
+            before.best_line,
+            color,
+            material_before,
+        )
+        played_line_material_gain = projected_material_gain(
+            positions[idx + 1],
+            after.best_line,
+            color,
+            material_before,
+        )
+        missed_tactical_gain = max(0, best_line_material_gain - played_line_material_gain)
         is_sacrifice = material_delta_for_mover <= -250
-
+        captured_piece = raw.get("captured_piece")
+        captured_piece_value = (
+            int(captured_piece.get("value") or 0)
+            if isinstance(captured_piece, dict)
+            else 0
+        )
         # Mate scores are useful for classification but too large for summary math.
         summary_loss = min(loss, MATE_SCORE)
         classification = classification_for_move(
             expected_loss=expected_loss,
             cp_loss=summary_loss,
+            move_number=raw["move_number"],
             played_uci=raw["uci"],
             best_uci=before.best_move,
-            ply=raw["ply"],
+            is_book=bool(raw.get("is_book")),
             is_sacrifice=is_sacrifice,
+            captured_piece_value=captured_piece_value,
+            gives_check="+" in str(raw["san"]) or "#" in str(raw["san"]),
             before_expected=before_expected,
+            after_expected=after_expected,
+            next_best_expected=next_best_expected,
+            missed_tactical_gain=missed_tactical_gain,
         )
-        explanation = explanation_for(classification, summary_loss, expected_loss, best_san)
+        explanation = explanation_for(
+            classification,
+            summary_loss,
+            expected_loss,
+            best_san,
+            missed_tactical_gain,
+        )
 
         if classification in counts[color]:
             counts[color][classification] += 1
-        losses_by_side[color].append(summary_loss)
+        expected_losses_by_side[color].append(expected_loss)
 
         move_result = {
             **raw,
+            "is_book": classification == "book",
             "eval_before": before.eval.as_dict(),
             "eval_after": after.eval.as_dict(),
             "best_move": before.best_move,
@@ -311,6 +620,7 @@ def analyze_pgn(pgn: str) -> dict[str, Any]:
             "reply_engine_lines": after_engine_lines,
             "centipawn_loss": summary_loss,
             "expected_points_loss": round(expected_loss, 4),
+            "missed_tactical_gain_cp": missed_tactical_gain,
             "classification": classification,
             "explanation": explanation,
         }
@@ -332,8 +642,11 @@ def analyze_pgn(pgn: str) -> dict[str, Any]:
         "date": headers.get("Date", "Unknown"),
         "white": headers.get("White", "White"),
         "black": headers.get("Black", "Black"),
+        "white_elo": headers.get("WhiteElo", ""),
+        "black_elo": headers.get("BlackElo", ""),
         "result": headers.get("Result", "*"),
-        "opening": opening_from_headers(headers),
+        "termination": headers.get("Termination", ""),
+        "opening": opening_from_moves(moves, headers),
         "initial_fen": positions[0].fen() if positions else INITIAL_FEN,
         "analysis_source": analysis_source,
         "engine_depth": depth,
@@ -342,11 +655,11 @@ def analyze_pgn(pgn: str) -> dict[str, Any]:
     summary = {
         "white": {
             **counts["white"],
-            "accuracy": accuracy_for(losses_by_side["white"]),
+            "accuracy": accuracy_for(expected_losses_by_side["white"]),
         },
         "black": {
             **counts["black"],
-            "accuracy": accuracy_for(losses_by_side["black"]),
+            "accuracy": accuracy_for(expected_losses_by_side["black"]),
         },
         "material_balance_cp": material_balance(positions[-1]) if positions else 0,
         "material_balance_display": format_material_balance(material_balance(positions[-1])) if positions else "+0.0",
@@ -367,7 +680,7 @@ def evaluate_fen(fen: str) -> dict[str, Any]:
     except ValueError as exc:
         raise ValueError("Invalid FEN.") from exc
 
-    depth = int(os.getenv("ENGINE_DEPTH", "8") or "8")
+    depth = engine_depth()
     analysis = analyze_positions([board.copy(stack=False)], depth=depth)[0]
     lines = engine_lines_payload(board, analysis)
 

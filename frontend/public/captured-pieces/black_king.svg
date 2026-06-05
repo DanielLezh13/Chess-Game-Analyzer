@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="black king">
+  <g fill="#15191E" stroke="#E5E7EB" stroke-width="3.2" stroke-linejoin="round" stroke-linecap="round">
+    <path d="M29 7 H35 V15 H43 V21 H35 V29 H29 V21 H21 V15 H29 Z"/>
+<path d="M32 27 C42 34 41 45 36 48 H28 C23 45 22 34 32 27 Z"/>
+<rect x="20" y="48" width="24" height="8" rx="2"/>
+  </g>
+</svg>

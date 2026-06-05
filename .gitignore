@@ -3,13 +3,16 @@ node_modules/
 out/
 dist/
 build/
+.vercel/
 .env
 .env.local
 .venv/
 __pycache__/
 *.pyc
+*.tsbuildinfo
 .DS_Store
 coverage/
 .pytest_cache/
 .logs/
 .aider*
+.codex/

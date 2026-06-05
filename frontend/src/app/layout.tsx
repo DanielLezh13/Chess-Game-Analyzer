@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Chess Review",
-  description: "Local-first PGN chess game review",
+  description: "Review chess games with move classifications, evaluations, opening detection, and account-backed game history.",
 };
 
 export default function RootLayout({
@@ -17,4 +17,3 @@ export default function RootLayout({
     </html>
   );
 }
-

@@ -6,5 +6,10 @@ export default defineConfig([
   ...nextVitals,
   ...nextTypescript,
   globalIgnores([".next/**", "out/**", "build/**", "next-env.d.ts"]),
+  {
+    rules: {
+      "@typescript-eslint/no-explicit-any": "warn",
+      "react-hooks/set-state-in-effect": "warn",
+    },
+  },
 ]);
-

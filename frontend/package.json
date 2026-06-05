@@ -6,13 +6,16 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "import:public-games": "node ../scripts/import-public-games.mjs"
   },
   "dependencies": {
     "@lichess-org/chessground": "^10.1.1",
+    "@supabase/ssr": "^0.10.3",
+    "@supabase/supabase-js": "^2.107.0",
     "chess.js": "latest",
     "lucide-react": "latest",
-    "next": "latest",
+    "next": "^16.2.7",
     "react": "latest",
     "react-dom": "latest"
   },

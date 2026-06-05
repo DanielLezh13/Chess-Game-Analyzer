@@ -39,6 +39,9 @@ export type AnalysisMove = {
   } | null;
   material_balance_cp: number;
   material_balance_display: string;
+  is_book?: boolean;
+  opening?: string;
+  eco?: string;
   eval_before: EvalScore;
   eval_after: EvalScore;
   best_move: string | null;
@@ -48,6 +51,7 @@ export type AnalysisMove = {
   reply_engine_lines: EngineLine[];
   centipawn_loss: number;
   expected_points_loss?: number;
+  missed_tactical_gain_cp?: number;
   classification: Classification;
   explanation: string;
 };
@@ -59,7 +63,10 @@ export type AnalysisResult = {
     date: string;
     white: string;
     black: string;
+    white_elo?: string;
+    black_elo?: string;
     result: string;
+    termination?: string;
     opening: string;
     initial_fen: string;
     analysis_source: string;

@@ -29,6 +29,7 @@ export type ChessgroundBoardProps = {
   // custom square colors
   darkSquareColor?: string;
   lightSquareColor?: string;
+  mountDelayMs?: number;
 
   children?: ReactNode;
 };
@@ -45,68 +46,100 @@ export default function ChessgroundBoard({
   onSelect,
   darkSquareColor = "#6f95a8",
   lightSquareColor = "#d7e5e8",
+  mountDelayMs = 0,
   children,
 }: ChessgroundBoardProps) {
   const boardRef = useRef<HTMLDivElement>(null);
   const cgRef = useRef<Api | null>(null);
+  const [boardRevision, setBoardRevision] = useState(0);
 
   // Store callbacks in refs to avoid re-creating chessground on callback change
   const onMoveRef = useRef(onMove);
-  onMoveRef.current = onMove;
   const onSelectRef = useRef(onSelect);
-  onSelectRef.current = onSelect;
+
+  useEffect(() => {
+    onMoveRef.current = onMove;
+    onSelectRef.current = onSelect;
+  }, [onMove, onSelect]);
 
   // Initialize chessground once
   useEffect(() => {
     if (!boardRef.current) return;
 
-    const config: Config = {
-      fen,
-      orientation: orientation as CgColor,
-      turnColor: turnColor as CgColor,
-      viewOnly,
-      coordinates: false,
-      highlight: {
-        lastMove: false,
-        check: false,
-      },
-      animation: {
-        enabled: animationEnabled,
-        duration: animationDuration,
-      },
-      movable: {
-        free: false,
-        color: turnColor as CgColor,
-        dests: (dests ?? new Map()) as Map<Key, Key[]>,
-        showDests: false,
-      },
-      draggable: {
-        enabled: !viewOnly,
-        distance: 0,
-        showGhost: false,
-      },
-      selectable: {
-        enabled: !viewOnly,
-      },
-      events: {
-        move: (orig, dest, capturedPiece) => {
-          onMoveRef.current?.(orig, dest, capturedPiece as { color: string; role: string } | undefined);
+    let cg: Api | null = null;
+    let mountTimer: number | null = null;
+    const settleTimers: number[] = [];
+
+    const mountBoard = () => {
+      if (!boardRef.current) return;
+
+      const config: Config = {
+        fen,
+        orientation: orientation as CgColor,
+        turnColor: turnColor as CgColor,
+        viewOnly,
+        coordinates: false,
+        highlight: {
+          lastMove: false,
+          check: false,
         },
-        select: (key) => {
-          onSelectRef.current?.(key);
+        animation: {
+          enabled: animationEnabled,
+          duration: animationDuration,
         },
-      },
-      drawable: {
-        enabled: false,
-        visible: false,
-      },
+        movable: {
+          free: false,
+          color: turnColor as CgColor,
+          dests: (dests ?? new Map()) as Map<Key, Key[]>,
+          showDests: false,
+        },
+        draggable: {
+          enabled: !viewOnly,
+          distance: 0,
+          showGhost: false,
+        },
+        selectable: {
+          enabled: !viewOnly,
+        },
+        events: {
+          move: (orig, dest, capturedPiece) => {
+            onMoveRef.current?.(orig, dest, capturedPiece as { color: string; role: string } | undefined);
+          },
+          select: (key) => {
+            onSelectRef.current?.(key);
+          },
+        },
+        drawable: {
+          enabled: false,
+          visible: false,
+        },
+      };
+
+      cg = Chessground(boardRef.current, config);
+      cgRef.current = cg;
+      setBoardRevision((revision) => revision + 1);
+
+      [420].forEach((delay) => {
+        const timer = window.setTimeout(() => {
+          cgRef.current?.redrawAll();
+          setBoardRevision((revision) => revision + 1);
+        }, delay);
+        settleTimers.push(timer);
+      });
     };
 
-    const cg = Chessground(boardRef.current, config);
-    cgRef.current = cg;
+    if (mountDelayMs > 0) {
+      mountTimer = window.setTimeout(mountBoard, mountDelayMs);
+    } else {
+      mountBoard();
+    }
 
     return () => {
-      cg.destroy();
+      if (mountTimer !== null) {
+        window.clearTimeout(mountTimer);
+      }
+      settleTimers.forEach((timer) => window.clearTimeout(timer));
+      cg?.destroy();
       cgRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -169,11 +202,12 @@ export default function ChessgroundBoard({
     board.style.backgroundImage = `url(${canvas.toDataURL()})`;
     board.style.backgroundSize = "cover";
     board.style.imageRendering = "pixelated";
-  }, [darkSquareColor, lightSquareColor]);
+  }, [boardRevision, darkSquareColor, lightSquareColor]);
 
   // Use portals to render overlays into cg-board after chessground creates it
   const [highlightContainer, setHighlightContainer] = useState<HTMLElement | null>(null);
   const [arrowContainer, setArrowContainer] = useState<HTMLElement | null>(null);
+  const [coordinateContainer, setCoordinateContainer] = useState<HTMLElement | null>(null);
   const [badgeContainer, setBadgeContainer] = useState<HTMLElement | null>(null);
 
   useEffect(() => {
@@ -201,17 +235,27 @@ export default function ChessgroundBoard({
       }
       setArrowContainer(arrowDiv);
 
-      // Create badge layer (z-[5], above everything)
-      let badgeDiv = cgBoard.querySelector(".custom-badges") as HTMLElement | null;
+      let coordinateDiv = cgBoard.querySelector(".custom-coordinates") as HTMLElement | null;
+      if (!coordinateDiv) {
+        coordinateDiv = document.createElement("div");
+        coordinateDiv.className = "custom-coordinates pointer-events-none absolute inset-0 z-[4]";
+        coordinateDiv.style.boxSizing = "content-box";
+        coordinateDiv.style.imageRendering = "auto";
+        cgBoard.appendChild(coordinateDiv);
+      }
+      setCoordinateContainer(coordinateDiv);
+
+      // Keep badges outside cg-board so they don't inherit the pixelated board rendering.
+      let badgeDiv = boardRef.current.querySelector(":scope > .custom-badges") as HTMLElement | null;
       if (!badgeDiv) {
         badgeDiv = document.createElement("div");
         badgeDiv.className = "custom-badges pointer-events-none absolute inset-0 z-[5]";
         badgeDiv.style.boxSizing = "content-box";
-        cgBoard.appendChild(badgeDiv);
+        boardRef.current.appendChild(badgeDiv);
       }
       setBadgeContainer(badgeDiv);
     }
-  }, []);
+  }, [boardRevision]);
 
   // Separate children into different layers
   const getLayer = (c: ReactNode): "highlight" | "arrow" | "badge" => {
@@ -239,10 +283,11 @@ export default function ChessgroundBoard({
     <div
       ref={boardRef}
       className="cg-wrap"
-      style={{ width: "100%", height: "100%", borderRadius: "3px", overflow: "hidden" }}
+      style={{ position: "relative", width: "100%", height: "100%", borderRadius: "3px", overflow: "hidden" }}
     >
       {highlightContainer ? createPortal(highlights, highlightContainer) : null}
       {arrowContainer ? createPortal(arrows, arrowContainer) : null}
+      {coordinateContainer ? createPortal(<BoardCoordinateOverlay orientation={orientation} />, coordinateContainer) : null}
       {badgeContainer ? createPortal(badges, badgeContainer) : null}
     </div>
   );
@@ -256,6 +301,63 @@ export function squareToPos(square: string, orientation: "white" | "black"): { c
     return { col: file, row: 7 - rank };
   }
   return { col: 7 - file, row: rank };
+}
+
+function BoardCoordinateOverlay({ orientation = "white" }: { orientation?: "white" | "black" }) {
+  const files = orientation === "white"
+    ? ["a", "b", "c", "d", "e", "f", "g", "h"]
+    : ["h", "g", "f", "e", "d", "c", "b", "a"];
+  const ranks = orientation === "white"
+    ? ["8", "7", "6", "5", "4", "3", "2", "1"]
+    : ["1", "2", "3", "4", "5", "6", "7", "8"];
+  const coordinateTextStyle: CSSProperties = {
+    fontSize: "clamp(8px, 1.7cqw, 14px)",
+    lineHeight: 1,
+    padding: "clamp(2px, 0.55cqw, 5px)",
+  };
+
+  function coordinateColor(row: number, col: number) {
+    return (row + col) % 2 === 1 ? "rgba(216, 235, 240, 0.88)" : "rgba(25, 54, 68, 0.76)";
+  }
+
+  return (
+    <div className="pointer-events-none absolute inset-0 z-[4] select-none">
+      {ranks.map((rank, row) => (
+        <span
+          key={`rank-${rank}`}
+          className="absolute font-black"
+          style={{
+            ...coordinateTextStyle,
+            color: coordinateColor(row, 0),
+            textShadow: "0 1px 1px rgba(255,255,255,0.18)",
+            left: "0%",
+            top: `${row * 12.5}%`,
+            width: "12.5%",
+            height: "12.5%",
+          }}
+        >
+          {rank}
+        </span>
+      ))}
+      {files.map((file, col) => (
+        <span
+          key={`file-${file}`}
+          className="absolute flex items-end justify-end font-black"
+          style={{
+            ...coordinateTextStyle,
+            color: coordinateColor(7, col),
+            textShadow: "0 1px 1px rgba(255,255,255,0.18)",
+            left: `${col * 12.5}%`,
+            top: "87.5%",
+            width: "12.5%",
+            height: "12.5%",
+          }}
+        >
+          {file}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 // Overlay component for square highlights and legal moves (z-[1], behind pieces)
@@ -374,12 +476,12 @@ export function BoardBadgeOverlay({
                 <img
                   src={ann.iconSrc}
                   alt={ann.label}
-                  className="pointer-events-none absolute z-40 h-8 w-8 object-contain"
+                  className="board-badge-image pointer-events-none absolute z-40 h-[52%] w-[52%] object-contain"
                   style={annotationStyle}
                 />
               ) : (
                 <span
-                  className={`move-badge-text pointer-events-none absolute z-40 h-7 min-w-7 rounded-full px-1 shadow-sm ${ann.tone}`}
+                  className={`move-badge-text pointer-events-none absolute z-40 h-[44%] min-w-[44%] rounded-full px-1.5 shadow-sm ${ann.tone}`}
                   style={annotationStyle}
                 >
                   {ann.label}
