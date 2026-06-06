@@ -757,6 +757,11 @@ function classificationMapFromAnalysis(analysis: AnalysisResult | null) {
   ) as Record<number, Classification | null>;
 }
 
+function trustedContinuationClassification(analysis: AnalysisResult | null) {
+  if (!analysis || analysis.metadata.analysis_source !== "stockfish") return null;
+  return analysis.moves.at(-1)?.classification ?? null;
+}
+
 function analysisWithFallbackClassifications(analysis: AnalysisResult): AnalysisResult {
   return {
     ...analysis,
@@ -1706,7 +1711,7 @@ export default function Home() {
   const reviewPlayedSquares = selectedMove ? boardSquareHighlights({ uci: selectedMove.uci, classification: selectedMove.classification }, "played") : {};
   // Branch played squares: tint the last branch move
   const branchPlayedSquares = branchMoveUci
-    ? boardSquareHighlights({ uci: branchMoveUci, classification: branchMoveAnalysis?.classification ?? branchMoveClassification ?? undefined }, "played")
+    ? boardSquareHighlights({ uci: branchMoveUci, classification: branchMoveClassification ?? undefined }, "played")
     : {};
   const reviewMoveSquares = squareNameFromUci(selectedMove?.uci);
   const reviewSquareAnnotations = reviewMoveSquares
@@ -1762,7 +1767,7 @@ export default function Home() {
     if (!branchOriginPly || !branchMoveUci) return {};
     const annotations: Record<string, SquareAnnotation> = {};
     const squares = squareNameFromUci(branchMoveUci);
-    const classification = branchMoveAnalysis?.classification ?? branchMoveClassification;
+    const classification = branchMoveClassification;
     if (squares && classification) {
       const [, toSquare] = squares;
       annotations[toSquare] = {
@@ -1843,9 +1848,8 @@ export default function Home() {
         if (controller.signal.aborted) return;
 
         const classifiedPayload = analysisWithFallbackClassifications(payload);
-        const latestMove = classifiedPayload.moves[classifiedPayload.moves.length - 1];
         setBranchAnalysisResult(classifiedPayload);
-        setBranchMoveClassification(latestMove?.classification ?? null);
+        setBranchMoveClassification(trustedContinuationClassification(payload));
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
@@ -2080,6 +2084,20 @@ export default function Home() {
     setPanelTab("analysis");
   }
 
+  function openGameLibrary(tab: GameSource) {
+    transitionBoardShell();
+    setAnalysis(null);
+    setPendingGameReview(null);
+    setLoadingGameId(null);
+    setIsLoading(false);
+    setError(null);
+    setShowUploadInHistory(false);
+    setHistoryView("list");
+    resetLiveBoard();
+    setLiveMode(true);
+    setPanelTab(tab);
+  }
+
   async function analyzePlaytestAsReview() {
     const cleanPgn = normalizePgn(cleanPgnFromGameHistory(liveGame, liveStartFen));
     if (!cleanPgn) {
@@ -2161,7 +2179,7 @@ export default function Home() {
 
       setPlaytestAnalysisResult(classifiedPayload);
       setPlaytestMoveClassifications((current) => ({ ...current, ...classifications }));
-      setBranchMoveClassification(classifications[sourceCursor - 1] ?? null);
+      setBranchMoveClassification(trustedContinuationClassification(payload));
     } catch (err) {
       if (signal?.aborted) return;
       const message = err instanceof Error ? err.message : "Analysis failed.";
@@ -2793,12 +2811,10 @@ export default function Home() {
           <HomeIntroLayout
             onFreshBoard={startLiveBoard}
             onMyGames={() => {
-              setActiveGameSource(null);
-              setPanelTab("mygames");
+              openGameLibrary("mygames");
             }}
             onPublicGames={() => {
-              setActiveGameSource(null);
-              setPanelTab("publicgames");
+              openGameLibrary("publicgames");
             }}
             onSave={saveCurrentGame}
             saveDisabled={reviewSans.length === 0 && liveSans.length === 0}
@@ -2837,14 +2853,7 @@ export default function Home() {
             onAddPgn={() => addUploadedGame(false)}
             onTogglePlaytestAnalysis={analyzePlaytestAsReview}
             onExitPlaytestAnalysis={returnToPlaytestGame}
-            onBackToList={() => {
-                          setPanelTab("mygames");
-                          setAnalysis(null);
-                          setActivePly(0);
-                          setBranchOriginPly(null);
-                          setLiveMode(true);
-                          resetLiveBoard();
-                        }}
+            onBackToList={() => openGameLibrary(activeGameSource ?? "mygames")}
             onDrop={handleBoardDrop}
             onFlipBoard={() => setBoardOrientation(boardOrientation === "white" ? "black" : "white")}
             onFreshBoard={startLiveBoard}
@@ -2872,7 +2881,13 @@ export default function Home() {
             onSample={() => setPgn(SAMPLE_PGN)}
             onSaveCurrentPgn={saveCurrentGame}
             onHome={() => setPanelTab("home")}
-            onSetPanelTab={setPanelTab}
+            onSetPanelTab={(tab) => {
+              if (tab === "mygames" || tab === "publicgames") {
+                openGameLibrary(tab);
+                return;
+              }
+              setPanelTab(tab);
+            }}
             onSetPgn={setPgn}
             dragHoverSquare={dragHoverSquare}
             onSquareClick={handleBoardSquareClick}
@@ -2922,12 +2937,10 @@ export default function Home() {
                 setPanelTab("home");
               }}
               onMyGames={() => {
-                setActiveGameSource(null);
-                setPanelTab("mygames");
+                openGameLibrary("mygames");
               }}
               onPublicGames={() => {
-                setActiveGameSource(null);
-                setPanelTab("publicgames");
+                openGameLibrary("publicgames");
               }}
               onSave={saveCurrentGame}
               saveDisabled={reviewSans.length === 0}
@@ -4641,7 +4654,7 @@ function LiveBoard({
     : detectOpening(sans);
   const currentClassification =
     playtestAnalysis
-      ? moveClassifications[visiblePly - 1] ?? currentAnalyzedMove?.classification ?? branchMoveAnalysis?.classification ?? branchMoveClassification
+      ? moveClassifications[visiblePly - 1] ?? currentAnalyzedMove?.classification ?? branchMoveClassification
       : null;
   const currentMoveUci =
     currentAnalyzedMove?.uci ?? liveHistory[visiblePly]?.lastMoveUci ?? branchMoveUci ?? (lastMove ? `${lastMove.from}${lastMove.to}` : null);
@@ -6444,7 +6457,7 @@ function LiveAnalysisPanel({
   const currentMoveSan = isBranchMode ? branchMoveSan : typeof currentMove === "string" ? currentMove : currentMove?.san;
   const currentMoveClassification =
     isBranchMode
-      ? branchMoveAnalysis?.classification ?? branchMoveClassification
+      ? branchMoveClassification
       : (typeof currentMove === "string" ? null : currentMove?.classification) ??
         playtestMoveClassifications[visiblePly - 1] ??
         branchMoveClassification;
